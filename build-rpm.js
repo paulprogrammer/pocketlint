@@ -11,9 +11,12 @@ const distDir = path.join(projectDir, 'dist');
 const unpackedDir = path.join(distDir, 'linux-unpacked');
 const rpmbuildDir = path.join(distDir, 'rpmbuild');
 
+const pkg = require('./package.json');
+const version = pkg.version;
+
 // Spec file definition
 const specContent = `Name:           pocketlint
-Version:        1.0.0
+Version:        ${version}
 Release:        1
 Summary:        PipeWire Audio Logical Y-Split Recorder and Pocket AI Uploader
 License:        MIT
