@@ -1,0 +1,21 @@
+{
+  "name": "pocketlint",
+  "version": "1.0.0",
+  "description": "PipeWire Audio Logical Y-Split Recorder and Pocket AI Uploader",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [
+    "pipewire",
+    "loopback",
+    "audio",
+    "recorder",
+    "electron"
+  ],
+  "author": "Paul",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

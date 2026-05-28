@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PocketLint - PipeWire Logical Y-Split Audio Recorder</title>
+  <link rel="stylesheet" href="index.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- HEADER -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24" width="24" height="24">
+            <path fill="currentColor" d="M12,2A10,10,0,0,0,2,12a9.89,9.89,0,0,0,2.26,6.33l-2,2a1,1,0,0,0-.21,1.09A1,1,0,0,0,3,22h7a1,1,0,0,0,.71-.29l8-8A10,10,0,0,0,12,2Zm5,11H7V11H17Zm0-4H7V7H17Z"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>PocketLint</h1>
+          <p>Audio Logical Y-Split & Uploader</p>
+        </div>
+      </div>
+      
+      <div class="api-key-config">
+        <div class="input-group">
+          <span class="input-label">Pocket API Key</span>
+          <div class="password-wrapper">
+            <input type="password" id="apiKeyInput" placeholder="pk_..." />
+            <button class="icon-btn" id="toggleApiKeyVisibility" title="Toggle visibility">
+              <svg class="eye-open" viewBox="0 0 24 24" width="16" height="16">
+                <path fill="currentColor" d="M12,9A3,3,0,1,0,15,12,3,3,0,0,0,12,9Zm0,8a5,5,0,1,1,5-5A5,5,0,0,1,12,17Zm0-12A10,10,0,0,0,2,12a10,10,0,0,0,20,0A10,10,0,0,0,12,5Z"/>
+              </svg>
+            </button>
+          </div>
+          <button class="btn btn-primary btn-sm" id="saveApiKeyBtn">Save</button>
+        </div>
+        <div class="api-key-status" id="apiKeyStatus">
+          <span class="status-dot warning"></span> Key not set
+        </div>
+      </div>
+    </header>
+
+    <div class="app-layout">
+      
+      <!-- LEFT SIDEBAR / AUDIO CONFIG -->
+      <aside class="sidebar-config">
+        <div class="card card-glow">
+          <div class="card-header">
+            <h2>Audio Device Routing</h2>
+            <div class="status-badge" id="splitStatusBadge">
+              <span class="status-dot"></span> <span class="status-text">Inactive</span>
+            </div>
+          </div>
+          
+          <div class="card-body">
+            <p class="description">Select your target physical device (speakers/headphones). We will create a virtual loopback device that mirrors audio to this device while letting you record.</p>
+            
+            <div class="form-group">
+              <label for="sinkSelect">Target Physical Output</label>
+              <div class="select-wrapper">
+                <select id="sinkSelect">
+                  <option value="" disabled selected>Loading devices...</option>
+                </select>
+                <button class="icon-btn refresh-btn" id="refreshSinksBtn" title="Refresh devices">
+                  <svg viewBox="0 0 24 24" width="16" height="16">
+                    <path fill="currentColor" d="M17.65,6.35A7.95,7.95,0,0,0,12,4a8,8,0,1,0,8,8h-2a6,6,0,1,1-6-6,5.89,5.89,0,0,1,4.22,1.78L13,11h7V4Z"/>
+                  </svg>
+                </button>
+            </div>
+
+            <div class="form-group">
+              <label for="sourceSelect">Microphone Input</label>
+              <div class="select-wrapper">
+                <select id="sourceSelect">
+                  <option value="" disabled selected>Loading devices...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="routing-actions">
+              <button class="btn btn-accent w-full" id="toggleSplitBtn">Create Y-Split</button>
+              <button class="btn btn-outline w-full" id="testOutputBtn" disabled>Test Output Sound</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card stats-card">
+          <h3>System Information</h3>
+          <div class="stat-list">
+            <div class="stat-item">
+              <span class="stat-label">Virtual Sinks</span>
+              <span class="stat-value font-mono">PocketLoopback, PocketRecordMix</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Record Target</span>
+              <span class="stat-value font-mono">PocketRecordMix.monitor</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Audio Server</span>
+              <span class="stat-value">PipeWire / Pulse compat</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER / MAIN RECORDING WINDOW -->
+      <main class="main-content">
+        
+        <!-- RECORDER PANEL -->
+        <section class="card recorder-card">
+          <div class="recorder-container">
+            <div class="waveform-container" id="waveformContainer">
+              <div class="visualizer-bar bar-1"></div>
+              <div class="visualizer-bar bar-2"></div>
+              <div class="visualizer-bar bar-3"></div>
+              <div class="visualizer-bar bar-4"></div>
+              <div class="visualizer-bar bar-5"></div>
+              <div class="visualizer-bar bar-6"></div>
+              <div class="visualizer-bar bar-7"></div>
+              <div class="visualizer-bar bar-8"></div>
+              <div class="visualizer-bar bar-9"></div>
+              <div class="visualizer-bar bar-10"></div>
+              <div class="visualizer-bar bar-11"></div>
+              <div class="visualizer-bar bar-12"></div>
+              
+              <!-- Timer overlay -->
+              <div class="timer-overlay">
+                <span id="recordingTimer">00:00</span>
+              </div>
+            </div>
+
+            <div class="recording-meta">
+              <input type="text" id="recordingTitleInput" placeholder="Give this recording a title..." />
+              <div class="recording-state-desc" id="recordingStateDesc">Ready to record system audio</div>
+            </div>
+
+            <div class="recorder-actions">
+              <button class="btn btn-record" id="recordBtn" disabled>
+                <div class="record-icon-container">
+                  <div class="record-circle"></div>
+                </div>
+                <span id="recordBtnText">Start Recording</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- QUEUE & LIBRARY PANEL -->
+        <section class="card library-card">
+          <div class="card-header">
+            <h2>Recordings Queue &amp; History</h2>
+            <div class="queue-stats" id="queueStatsText">0 items (0 pending)</div>
+          </div>
+          
+          <div class="card-body p-0">
+            <div class="recordings-table-wrapper">
+              <table class="recordings-table" id="recordingsTable">
+                <thead>
+                  <tr>
+                    <th>Title &amp; Date</th>
+                    <th>Duration</th>
+                    <th>Upload Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="queueList">
+                  <!-- Dynamically populated -->
+                  <tr class="empty-state">
+                    <td colspan="4">
+                      <div class="empty-state-container">
+                        <svg viewBox="0 0 24 24" width="48" height="48">
+                          <path fill="currentColor" d="M19,15H15A3,3,0,0,1,9,15H5V5H19M19,3H5A2,2,0,0,0,3,5V19a2,2,0,0,0,2,2H19a2,2,0,0,0,2-2V5A2,2,0,0,0,19,3Z"/>
+                        </svg>
+                        <p>No recordings captured yet.</p>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        
+      </main>
+
+    </div>
+    
+  </div>
+
+  <!-- Notification Banner -->
+  <div class="toast-notification" id="toastNotification">
+    <span id="toastMessage"></span>
+  </div>
+  
+  <script src="renderer.js"></script>
+</body>
+</html>
