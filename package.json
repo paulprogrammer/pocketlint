@@ -24,6 +24,12 @@
   "build": {
     "appId": "com.heypocket.pocketlint",
     "productName": "PocketLint",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "src/**/*"
+    ],
     "directories": {
       "output": "dist"
     },
