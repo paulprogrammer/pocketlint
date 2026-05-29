@@ -319,12 +319,60 @@ ipcMain.handle('stop-playback', async () => {
   return { success: true };
 });
 
-// Helper to normalize volume and package as dual-track M4A/AAC using FFmpeg
-function normalizeAndTagRecording(tempWavPath, finalM4aPath, speakerName) {
+// Helper to analyze the loudness of a specific channel (incorporating noise reduction)
+function analyzeLoudness(filePath, channel) {
+  return new Promise((resolve) => {
+    // Split channels, apply noise reduction, and run loudnorm in print_format=json
+    const filter = `[0:a]channelsplit=channel_layout=stereo[left][right]; [${channel}]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+    const cmd = `ffmpeg -i "${filePath}" -filter_complex "${filter}" -f null -`;
+    
+    exec(cmd, (error, stdout, stderr) => {
+      const output = stderr || stdout || '';
+      
+      // Parse the loudnorm JSON measurement block from stderr
+      const match = output.match(/\{\s*"input_i"[\s\S]*?\}/);
+      if (match) {
+        try {
+          const stats = JSON.parse(match[0]);
+          return resolve(stats);
+        } catch (e) {
+          console.error(`[AudioNormalizer] Failed to parse loudnorm JSON for channel ${channel}:`, e);
+        }
+      }
+      
+      console.warn(`[AudioNormalizer] Analysis failed for channel ${channel}, using fallbacks.`);
+      resolve({
+        input_i: '-24.0',
+        input_tp: '-2.0',
+        input_lra: '5.0',
+        input_thresh: '-35.0',
+        target_offset: '0.0'
+      });
+    });
+  });
+}
+
+// Helper to normalize volume and package as dual-track M4A/AAC using FFmpeg (with two-pass normalization and noise reduction)
+async function normalizeAndTagRecording(tempWavPath, finalM4aPath, speakerName) {
+  console.log(`[AudioNormalizer] Starting channel analysis for: ${tempWavPath}`);
+  const leftStats = await analyzeLoudness(tempWavPath, 'left');
+  const rightStats = await analyzeLoudness(tempWavPath, 'right');
+  console.log('[AudioNormalizer] Channel analysis complete.', { leftStats, rightStats });
+
   return new Promise((resolve, reject) => {
-    // Split stereo L (system) and R (mic), loudnorm both independently to -16 LUFS,
-    // and map them to separate tracks inside the output M4A file with metadata tags.
-    const filterComplex = '[0:a]channelsplit=channel_layout=stereo[left][right]; [left]loudnorm=I=-16:TP=-1.5:LRA=11[nleft]; [right]loudnorm=I=-16:TP=-1.5:LRA=11[nright]';
+    // Split stereo L (system) and R (mic), apply noise reduction (afftdn),
+    // perform second-pass linear loudnorm, and map them to separate tracks with metadata.
+    const filterComplex = `[0:a]channelsplit=channel_layout=stereo[left][right]; ` +
+      `[left]afftdn[denoised_left]; ` +
+      `[denoised_left]loudnorm=I=-16:TP=-1.5:LRA=11:` +
+      `measured_I=${leftStats.input_i}:measured_TP=${leftStats.input_tp}:` +
+      `measured_LRA=${leftStats.input_lra}:measured_thresh=${leftStats.input_thresh}:` +
+      `offset=${leftStats.target_offset}[nleft]; ` +
+      `[right]afftdn[denoised_right]; ` +
+      `[denoised_right]loudnorm=I=-16:TP=-1.5:LRA=11:` +
+      `measured_I=${rightStats.input_i}:measured_TP=${rightStats.input_tp}:` +
+      `measured_LRA=${rightStats.input_lra}:measured_thresh=${rightStats.input_thresh}:` +
+      `offset=${rightStats.target_offset}[nright]`;
     
     const args = [
       '-y',
@@ -339,10 +387,10 @@ function normalizeAndTagRecording(tempWavPath, finalM4aPath, speakerName) {
       finalM4aPath
     ];
     
-    console.log(`[AudioNormalizer] Processing ${tempWavPath} to ${finalM4aPath} (Speaker: ${speakerName})`);
+    console.log(`[AudioNormalizer] Rendering M4A package: ${finalM4aPath}`);
     execFile('ffmpeg', args, (error, stdout, stderr) => {
       if (error) {
-        console.error('[AudioNormalizer] FFmpeg normalization/tagging error:', stderr || error.message);
+        console.error('[AudioNormalizer] FFmpeg rendering error:', stderr || error.message);
         return reject(error);
       }
       
