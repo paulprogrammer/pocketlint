@@ -1,6 +1,6 @@
 {
   "name": "pocketlint",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "PipeWire Audio Logical Y-Split Recorder and Pocket AI Uploader",
   "main": "main.js",
   "homepage": "https://github.com/paul/pocketlint",
