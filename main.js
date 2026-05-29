@@ -226,16 +226,16 @@ ipcMain.handle('setup-loopback', async (event, sinkName, sourceName) => {
     await execPromise('pactl load-module module-null-sink sink_name=PocketLoopback sink_properties=device.description="PocketLoopback"');
 
     // 2. Route PocketLoopback monitor back to physical output speakers so user can hear system audio
-    await execPromise(`pactl load-module module-loopback source=PocketLoopback.monitor sink="${sinkName}"`);
+    await execPromise(`pactl load-module module-loopback source=PocketLoopback.monitor sink="${sinkName}" latency_msec=20 adjust_time=0`);
 
     // 3. Create virtual null sink for recording mixer (PocketRecordMix)
     await execPromise('pactl load-module module-null-sink sink_name=PocketRecordMix sink_properties=device.description="PocketRecordMix"');
 
     // 4. Route system audio from PocketLoopback monitor to PocketRecordMix
-    await execPromise('pactl load-module module-loopback source=PocketLoopback.monitor sink=PocketRecordMix');
+    await execPromise('pactl load-module module-loopback source=PocketLoopback.monitor sink=PocketRecordMix latency_msec=20 adjust_time=0');
 
     // 5. Route physical microphone source to PocketRecordMix (without looping back to physical speakers)
-    await execPromise(`pactl load-module module-loopback source="${sourceName}" sink=PocketRecordMix`);
+    await execPromise(`pactl load-module module-loopback source="${sourceName}" sink=PocketRecordMix latency_msec=20 adjust_time=0`);
 
     config.targetSinkName = sinkName;
     config.targetSourceName = sourceName;
