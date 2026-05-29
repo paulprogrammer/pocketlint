@@ -6,6 +6,7 @@ const apiKeyStatus = document.getElementById('apiKeyStatus');
 
 const sinkSelect = document.getElementById('sinkSelect');
 const sourceSelect = document.getElementById('sourceSelect');
+const speakerNameInput = document.getElementById('speakerNameInput');
 const refreshSinksBtn = document.getElementById('refreshSinksBtn');
 const toggleSplitBtn = document.getElementById('toggleSplitBtn');
 const testOutputBtn = document.getElementById('testOutputBtn');
@@ -41,6 +42,13 @@ async function init() {
     } else {
       updateApiKeyStatus(false);
     }
+
+    // 1.5. Load Speaker Name from localStorage
+    const savedSpeakerName = localStorage.getItem('speakerName') || 'Local Speaker';
+    speakerNameInput.value = savedSpeakerName;
+    speakerNameInput.addEventListener('input', () => {
+      localStorage.setItem('speakerName', speakerNameInput.value.trim() || 'Local Speaker');
+    });
 
     // 2. Load sinks & sources
     await refreshSinks();
@@ -316,8 +324,9 @@ recordBtn.addEventListener('click', async () => {
   } else {
     // Start recording
     const title = recordingTitleInput.value.trim();
+    const speakerName = speakerNameInput.value.trim() || 'Local Speaker';
     try {
-      const res = await window.pocketlintAPI.startRecording(title);
+      const res = await window.pocketlintAPI.startRecording(title, speakerName);
       if (res.success) {
         showToast('Recording started', 'success');
       } else {

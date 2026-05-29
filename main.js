@@ -319,40 +319,47 @@ ipcMain.handle('stop-playback', async () => {
   return { success: true };
 });
 
-// Helper to normalize volume between recording channels (System on L, Mic on R) using FFmpeg
-function normalizeRecording(filePath) {
+// Helper to normalize volume and package as dual-track M4A/AAC using FFmpeg
+function normalizeAndTagRecording(tempWavPath, finalM4aPath, speakerName) {
   return new Promise((resolve, reject) => {
-    const tempFilePath = filePath + '.tmp.wav';
-    
-    // Split stereo L (system) and R (mic), loudnorm both independently to -16 LUFS, 
-    // mix them together, and run a final loudnorm pass to master the combined audio.
-    const filterComplex = '[0:a]channelsplit=channel_layout=stereo[left][right]; [left]loudnorm=I=-16:TP=-1.5:LRA=11[nleft]; [right]loudnorm=I=-16:TP=-1.5:LRA=11[nright]; [nleft][nright]amix=inputs=2:duration=longest:normalize=0[mixed]; [mixed]loudnorm=I=-16:TP=-1.5:LRA=11[aout]';
+    // Split stereo L (system) and R (mic), loudnorm both independently to -16 LUFS,
+    // and map them to separate tracks inside the output M4A file with metadata tags.
+    const filterComplex = '[0:a]channelsplit=channel_layout=stereo[left][right]; [left]loudnorm=I=-16:TP=-1.5:LRA=11[nleft]; [right]loudnorm=I=-16:TP=-1.5:LRA=11[nright]';
     
     const args = [
       '-y',
-      '-i', filePath,
+      '-i', tempWavPath,
       '-filter_complex', filterComplex,
-      '-map', '[aout]',
-      tempFilePath
+      '-map', '[nleft]',
+      '-metadata:s:a:0', 'title=group audio',
+      '-map', '[nright]',
+      '-metadata:s:a:1', `title=${speakerName || 'Local Speaker'}`,
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      finalM4aPath
     ];
     
-    console.log(`[AudioNormalizer] Normalizing channels in: ${filePath}`);
+    console.log(`[AudioNormalizer] Processing ${tempWavPath} to ${finalM4aPath} (Speaker: ${speakerName})`);
     execFile('ffmpeg', args, (error, stdout, stderr) => {
       if (error) {
-        console.error('[AudioNormalizer] FFmpeg normalization error:', stderr || error.message);
+        console.error('[AudioNormalizer] FFmpeg normalization/tagging error:', stderr || error.message);
         return reject(error);
       }
       
       try {
-        if (fs.existsSync(tempFilePath)) {
-          fs.renameSync(tempFilePath, filePath);
-          console.log(`[AudioNormalizer] Successfully normalized recording at ${filePath}`);
+        if (fs.existsSync(finalM4aPath)) {
+          console.log(`[AudioNormalizer] Successfully created multi-track M4A at ${finalM4aPath}`);
+          // Clean up temp WAV
+          if (fs.existsSync(tempWavPath)) {
+            fs.unlinkSync(tempWavPath);
+            console.log(`[AudioNormalizer] Cleaned up temporary WAV file: ${tempWavPath}`);
+          }
           resolve();
         } else {
-          reject(new Error('Temp output file was not created by FFmpeg'));
+          reject(new Error('M4A output file was not created by FFmpeg'));
         }
       } catch (err) {
-        console.error('[AudioNormalizer] Failed to replace original file:', err);
+        console.error('[AudioNormalizer] Cleanup or validation error:', err);
         reject(err);
       }
     });
@@ -360,7 +367,7 @@ function normalizeRecording(filePath) {
 }
 
 // 6. Start recording
-ipcMain.handle('start-recording', async (event, title) => {
+ipcMain.handle('start-recording', async (event, title, speakerName) => {
   try {
     const { isSplitEnabled } = await findLoadedModules();
     if (!isSplitEnabled) {
@@ -372,14 +379,15 @@ ipcMain.handle('start-recording', async (event, title) => {
     }
 
     const id = Date.now().toString();
-    const fileName = `recording_${id}.wav`;
+    const fileName = `recording_${id}.m4a`;
     const filePath = path.join(recordingsDir, fileName);
+    const tempWavPath = filePath + '.tmp.wav';
 
     recordingStartTime = Date.now();
     currentRecordingId = id;
 
-    // Start pw-record targetting our virtual monitor
-    recordProcess = spawn('pw-record', ['--target=PocketRecordMix', filePath]);
+    // Start pw-record targetting our virtual monitor, writing to temp WAV
+    recordProcess = spawn('pw-record', ['--target=PocketRecordMix', tempWavPath]);
 
     const item = {
       id,
@@ -390,7 +398,9 @@ ipcMain.handle('start-recording', async (event, title) => {
       duration: 0,
       status: 'RECORDED',
       error: null,
-      pocketId: null
+      pocketId: null,
+      speakerName: speakerName || 'Local Speaker',
+      tempWavPath
     };
 
     queue.unshift(item); // Add to the top
@@ -430,8 +440,8 @@ ipcMain.handle('stop-recording', async () => {
         clearInterval(checkInterval);
 
         if (item) {
-          // Normalize recording in the background, then trigger upload
-          normalizeRecording(item.filePath)
+          // Normalize and tag recording in the background, then trigger upload
+          normalizeAndTagRecording(item.tempWavPath, item.filePath, item.speakerName)
             .catch((err) => {
               console.error('[AudioNormalizer] Error during normalization:', err);
             })
@@ -557,7 +567,7 @@ async function uploadRecording(id) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        content_type: 'audio/wav',
+        content_type: 'audio/mp4',
         duration: item.duration,
         file_name: item.fileName,
         recording_at: item.recordingAt,
@@ -594,7 +604,7 @@ async function uploadRecording(id) {
     const s3Response = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'audio/wav'
+        'Content-Type': 'audio/mp4'
       },
       body: audioData
     });

@@ -403,6 +403,25 @@ body {
   box-shadow: 0 0 0 2px var(--accent-purple-glow);
 }
 
+#speakerNameInput {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-main);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: all var(--transition-speed) ease;
+}
+
+#speakerNameInput:focus {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 2px var(--accent-purple-glow);
+}
+
 .routing-actions {
   display: flex;
   flex-direction: column;

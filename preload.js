@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('pocketlintAPI', {
   playTestSound: () => ipcRenderer.invoke('play-test-sound'),
   playRecording: (id) => ipcRenderer.invoke('play-recording', id),
   stopPlayback: () => ipcRenderer.invoke('stop-playback'),
-  startRecording: (title) => ipcRenderer.invoke('start-recording', title),
+  startRecording: (title, speakerName) => ipcRenderer.invoke('start-recording', title, speakerName),
   stopRecording: () => ipcRenderer.invoke('stop-recording'),
   getQueue: () => ipcRenderer.invoke('get-queue'),
   deleteRecording: (id) => ipcRenderer.invoke('delete-recording', id),
