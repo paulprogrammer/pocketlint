@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execFile } = require('child_process');
 const util = require('util');
 const os = require('os');
 
@@ -231,11 +231,11 @@ ipcMain.handle('setup-loopback', async (event, sinkName, sourceName) => {
     // 3. Create virtual null sink for recording mixer (PocketRecordMix)
     await execPromise('pactl load-module module-null-sink sink_name=PocketRecordMix sink_properties=device.description="PocketRecordMix"');
 
-    // 4. Route system audio from PocketLoopback monitor to PocketRecordMix
-    await execPromise('pactl load-module module-loopback source=PocketLoopback.monitor sink=PocketRecordMix latency_msec=20 adjust_time=0');
+    // 4. Route system audio from PocketLoopback monitor to PocketRecordMix (Left channel only)
+    await execPromise('pactl load-module module-loopback source=PocketLoopback.monitor sink=PocketRecordMix latency_msec=20 adjust_time=0 channel_map=left');
 
-    // 5. Route physical microphone source to PocketRecordMix (without looping back to physical speakers)
-    await execPromise(`pactl load-module module-loopback source="${sourceName}" sink=PocketRecordMix latency_msec=20 adjust_time=0`);
+    // 5. Route physical microphone source to PocketRecordMix (Right channel only, without looping back to physical speakers)
+    await execPromise(`pactl load-module module-loopback source="${sourceName}" sink=PocketRecordMix latency_msec=20 adjust_time=0 channel_map=right`);
 
     config.targetSinkName = sinkName;
     config.targetSourceName = sourceName;
@@ -319,6 +319,46 @@ ipcMain.handle('stop-playback', async () => {
   return { success: true };
 });
 
+// Helper to normalize volume between recording channels (System on L, Mic on R) using FFmpeg
+function normalizeRecording(filePath) {
+  return new Promise((resolve, reject) => {
+    const tempFilePath = filePath + '.tmp.wav';
+    
+    // Split stereo L (system) and R (mic), loudnorm both independently to -16 LUFS, 
+    // mix them together, and run a final loudnorm pass to master the combined audio.
+    const filterComplex = '[0:a]channelsplit=channel_layout=stereo[left][right]; [left]loudnorm=I=-16:TP=-1.5:LRA=11[nleft]; [right]loudnorm=I=-16:TP=-1.5:LRA=11[nright]; [nleft][nright]amix=inputs=2:duration=longest:normalize=0[mixed]; [mixed]loudnorm=I=-16:TP=-1.5:LRA=11[aout]';
+    
+    const args = [
+      '-y',
+      '-i', filePath,
+      '-filter_complex', filterComplex,
+      '-map', '[aout]',
+      tempFilePath
+    ];
+    
+    console.log(`[AudioNormalizer] Normalizing channels in: ${filePath}`);
+    execFile('ffmpeg', args, (error, stdout, stderr) => {
+      if (error) {
+        console.error('[AudioNormalizer] FFmpeg normalization error:', stderr || error.message);
+        return reject(error);
+      }
+      
+      try {
+        if (fs.existsSync(tempFilePath)) {
+          fs.renameSync(tempFilePath, filePath);
+          console.log(`[AudioNormalizer] Successfully normalized recording at ${filePath}`);
+          resolve();
+        } else {
+          reject(new Error('Temp output file was not created by FFmpeg'));
+        }
+      } catch (err) {
+        console.error('[AudioNormalizer] Failed to replace original file:', err);
+        reject(err);
+      }
+    });
+  });
+}
+
 // 6. Start recording
 ipcMain.handle('start-recording', async (event, title) => {
   try {
@@ -388,13 +428,23 @@ ipcMain.handle('stop-recording', async () => {
     const checkInterval = setInterval(() => {
       if (!recordProcess) {
         clearInterval(checkInterval);
-        sendQueueUpdate();
 
-        // Proactively start background upload if API key is set
-        if (item && config.apiKey) {
-          uploadRecording(item.id).catch((err) => {
-            console.error('Background upload failure:', err);
-          });
+        if (item) {
+          // Normalize recording in the background, then trigger upload
+          normalizeRecording(item.filePath)
+            .catch((err) => {
+              console.error('[AudioNormalizer] Error during normalization:', err);
+            })
+            .finally(() => {
+              sendQueueUpdate();
+              if (config.apiKey) {
+                uploadRecording(item.id).catch((err) => {
+                  console.error('Background upload failure:', err);
+                });
+              }
+            });
+        } else {
+          sendQueueUpdate();
         }
 
         resolve({ success: true, item });
