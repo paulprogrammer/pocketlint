@@ -36,11 +36,11 @@ sudo apt install pipewire-utils pulseaudio-utils ffmpeg
    ```
 2. Install the Node.js dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 3. Start the application:
    ```bash
-   npm start
+   pnpm start
    ```
 
 ## Local Storage Layout

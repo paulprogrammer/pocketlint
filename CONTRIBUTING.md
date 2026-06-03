@@ -55,7 +55,7 @@ Since PocketLint directly interacts with system audio resources (PipeWire, Pulse
 ### Distributable Packaging Verification
 * If modifying the packaging configuration, compile and verify the generated RPM package locally:
   ```bash
-  npm run dist
+  pnpm run dist
   ```
 * Verify the package dependencies and binary permissions:
   ```bash

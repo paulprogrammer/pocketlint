@@ -98,7 +98,7 @@ async function build() {
   try {
     console.log('Step 1: Compiling Electron application directory...');
     // Ensure the output directory is generated first
-    await execPromise('npx electron-builder --linux --dir', { cwd: projectDir });
+    await execPromise('pnpm exec electron-builder --linux --dir', { cwd: projectDir });
     console.log('App directory compiled successfully in dist/linux-unpacked/');
 
     if (!fs.existsSync(unpackedDir)) {

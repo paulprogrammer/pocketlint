@@ -43,5 +43,12 @@
       "executableName": "pocketlint",
       "maintainer": "Paul <paul@example.com>"
     }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-winstaller",
+      "unrs-resolver"
+    ]
   }
 }
