@@ -322,8 +322,9 @@ ipcMain.handle('stop-playback', async () => {
 // Helper to analyze the loudness of a specific channel (incorporating noise reduction)
 function analyzeLoudness(filePath, channel) {
   return new Promise((resolve) => {
-    // Split channels, apply noise reduction, and run loudnorm in print_format=json
-    const filter = `[0:a]channelsplit=channel_layout=stereo[left][right]; [${channel}]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+    // Extract single channel using pan filter to avoid unconnected outputs, then run afftdn and loudnorm
+    const inputChan = channel === 'left' ? 'c0' : 'c1';
+    const filter = `[0:a]pan=mono|c0=${inputChan}[mono_chan]; [mono_chan]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
     const cmd = `ffmpeg -i "${filePath}" -filter_complex "${filter}" -f null -`;
     
     exec(cmd, (error, stdout, stderr) => {
@@ -361,18 +362,18 @@ async function normalizeAndTagRecording(tempWavPath, finalM4aPath, speakerName) 
 
   return new Promise((resolve, reject) => {
     // Split stereo L (system) and R (mic), apply noise reduction (afftdn),
-    // perform second-pass linear loudnorm, and map them to separate tracks with metadata.
+    // perform second-pass linear loudnorm, force mono layout (aac compatibility), and map them to separate tracks with metadata.
     const filterComplex = `[0:a]channelsplit=channel_layout=stereo[left][right]; ` +
       `[left]afftdn[denoised_left]; ` +
       `[denoised_left]loudnorm=I=-16:TP=-1.5:LRA=11:` +
       `measured_I=${leftStats.input_i}:measured_TP=${leftStats.input_tp}:` +
       `measured_LRA=${leftStats.input_lra}:measured_thresh=${leftStats.input_thresh}:` +
-      `offset=${leftStats.target_offset}[nleft]; ` +
+      `offset=${leftStats.target_offset},aformat=channel_layouts=mono[nleft]; ` +
       `[right]afftdn[denoised_right]; ` +
       `[denoised_right]loudnorm=I=-16:TP=-1.5:LRA=11:` +
       `measured_I=${rightStats.input_i}:measured_TP=${rightStats.input_tp}:` +
       `measured_LRA=${rightStats.input_lra}:measured_thresh=${rightStats.input_thresh}:` +
-      `offset=${rightStats.target_offset}[nright]`;
+      `offset=${rightStats.target_offset},aformat=channel_layouts=mono[nright]`;
     
     const args = [
       '-y',
