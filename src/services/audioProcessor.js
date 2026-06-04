@@ -6,9 +6,16 @@ class AudioProcessor {
     this.fs = fsClient;
   }
 
-  analyzeLoudness(filePath) {
+  analyzeLoudness(filePath, channel) {
     return new Promise((resolve) => {
-      const filter = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+      let filter;
+      if (channel === 'left') {
+        filter = `[0:a]pan=mono|c0=c0[mono_chan]; [mono_chan]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+      } else if (channel === 'right') {
+        filter = `[0:a]pan=mono|c0=c1[mono_chan]; [mono_chan]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+      } else {
+        filter = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+      }
       const cmd = `ffmpeg -threads 1 -i "${filePath}" -filter_complex "${filter}" -f null -`;
       
       this.shell.execWithCallback(cmd, (error, stdout, stderr) => {
@@ -38,16 +45,32 @@ class AudioProcessor {
   }
 
   async normalizeAndTagRecording(tempWavPath, finalMp3Path, speakerName) {
-    console.log(`[AudioProcessor] Starting dual-pass mono mixdown for: ${tempWavPath}`);
-    const stats = await this.analyzeLoudness(tempWavPath);
-    console.log('[AudioProcessor] Mixed loudness analysis complete.', { stats });
+    console.log(`[AudioProcessor] Starting channel checks for silence: ${tempWavPath}`);
+    const leftStats = await this.analyzeLoudness(tempWavPath, 'left');
+    const rightStats = await this.analyzeLoudness(tempWavPath, 'right');
+    
+    const leftLoudness = parseFloat(leftStats.input_i);
+    const rightLoudness = parseFloat(rightStats.input_i);
+    console.log(`[AudioProcessor] Channel integrated loudness: left=${leftLoudness} LUFS, right=${rightLoudness} LUFS`);
 
-    return new Promise((resolve, reject) => {
-      const filterComplex = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; ` +
-        `[denoised]loudnorm=I=-16:TP=-1.5:LRA=11:` +
-        `measured_I=${stats.input_i}:measured_TP=${stats.input_tp}:` +
-        `measured_LRA=${stats.input_lra}:measured_thresh=${stats.input_thresh}:` +
-        `offset=${stats.target_offset}[out]`;
+    const SILENCE_THRESHOLD = -45.0;
+    const isLeftSilent = leftLoudness <= SILENCE_THRESHOLD;
+    const isRightSilent = rightLoudness <= SILENCE_THRESHOLD;
+    const skipLoudness = isLeftSilent || isRightSilent;
+
+    return new Promise(async (resolve, reject) => {
+      let filterComplex;
+      if (skipLoudness) {
+        console.log(`[AudioProcessor] One or both streams are silent (left: ${leftLoudness} LUFS, right: ${rightLoudness} LUFS). Skipping loudness normalization.`);
+        filterComplex = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[out]`;
+      } else {
+        const stats = await this.analyzeLoudness(tempWavPath);
+        filterComplex = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; ` +
+          `[denoised]loudnorm=I=-16:TP=-1.5:LRA=11:` +
+          `measured_I=${stats.input_i}:measured_TP=${stats.input_tp}:` +
+          `measured_LRA=${stats.input_lra}:measured_thresh=${stats.input_thresh}:` +
+          `offset=${stats.target_offset}[out]`;
+      }
       
       const args = [
         '-threads', '1',
