@@ -10,7 +10,7 @@ class AudioProcessor {
     return new Promise((resolve) => {
       const inputChan = channel === 'left' ? 'c0' : 'c1';
       const filter = `[0:a]pan=mono|c0=${inputChan}[mono_chan]; [mono_chan]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
-      const cmd = `ffmpeg -i "${filePath}" -filter_complex "${filter}" -f null -`;
+      const cmd = `ffmpeg -threads 1 -i "${filePath}" -filter_complex "${filter}" -f null -`;
       
       this.shell.execWithCallback(cmd, (error, stdout, stderr) => {
         const output = stderr || stdout || '';
@@ -60,6 +60,7 @@ class AudioProcessor {
         `offset=${rightStats.target_offset},aformat=channel_layouts=mono[nright]`;
       
       const args = [
+        '-threads', '1',
         '-y',
         '-i', tempWavPath,
         '-filter_complex', filterComplex,
