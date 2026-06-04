@@ -91,26 +91,25 @@ Output message
 
       mockFs.existsSync.mockReturnValue(true);
 
-      await processor.normalizeAndTagRecording('temp.wav', 'final.m4a', 'Paul Williams');
+      await processor.normalizeAndTagRecording('temp.wav', 'final.mp3', 'Paul Williams');
 
-      expect(mockShell.execWithCallback).toHaveBeenCalledTimes(2);
+      expect(mockShell.execWithCallback).toHaveBeenCalledTimes(0);
       expect(mockShell.execFileWithCallback).toHaveBeenCalledTimes(1);
 
       const [file, args] = mockShell.execFileWithCallback.mock.calls[0];
       expect(file).toBe('ffmpeg');
       expect(args).toContain('temp.wav');
-      expect(args).toContain('final.m4a');
+      expect(args).toContain('final.mp3');
       expect(args).toContain('title=Paul Williams');
       
       const filterComplexIdx = args.indexOf('-filter_complex');
       expect(filterComplexIdx).not.toBe(-1);
       const filterComplex = args[filterComplexIdx + 1];
-      expect(filterComplex).toContain('measured_I=-12.0:measured_TP=-1.0');
-      expect(filterComplex).toContain('measured_I=-14.0:measured_TP=-1.5');
-      expect(filterComplex).toContain('aformat=channel_layouts=mono[nleft]');
-      expect(filterComplex).toContain('aformat=channel_layouts=mono[nright]');
+      expect(filterComplex).toContain('pan=mono');
+      expect(filterComplex).toContain('afftdn');
+      expect(filterComplex).toContain('loudnorm');
 
-      expect(mockFs.existsSync).toHaveBeenCalledWith('final.m4a');
+      expect(mockFs.existsSync).toHaveBeenCalledWith('final.mp3');
       expect(mockFs.existsSync).toHaveBeenCalledWith('temp.wav');
       expect(mockFs.unlinkSync).toHaveBeenCalledWith('temp.wav');
     });

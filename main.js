@@ -203,7 +203,7 @@ ipcMain.handle('start-recording', async (event, title, speakerName) => {
     }
 
     const id = Date.now().toString();
-    const fileName = `recording_${id}.m4a`;
+    const fileName = `recording_${id}.mp3`;
     const filePath = path.join(storage.recordingsDir, fileName);
     const tempWavPath = filePath + '.tmp.wav';
 

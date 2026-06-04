@@ -38,42 +38,26 @@ class AudioProcessor {
     });
   }
 
-  async normalizeAndTagRecording(tempWavPath, finalM4aPath, speakerName) {
-    console.log(`[AudioProcessor] Starting channel analysis for: ${tempWavPath}`);
-    const leftStats = await this.analyzeLoudness(tempWavPath, 'left');
-    const rightStats = await this.analyzeLoudness(tempWavPath, 'right');
-    console.log('[AudioProcessor] Channel analysis complete.', { leftStats, rightStats });
+  async normalizeAndTagRecording(tempWavPath, finalMp3Path, speakerName) {
+    console.log(`[AudioProcessor] Starting single-pass mono mixdown for: ${tempWavPath}`);
 
     return new Promise((resolve, reject) => {
-      // Split stereo L (system) and R (mic), apply noise reduction (afftdn),
-      // perform second-pass linear loudnorm, force mono layout (aac compatibility), and map them to separate tracks with metadata.
-      const filterComplex = `[0:a]channelsplit=channel_layout=stereo[left][right]; ` +
-        `[left]afftdn[denoised_left]; ` +
-        `[denoised_left]loudnorm=I=-16:TP=-1.5:LRA=11:` +
-        `measured_I=${leftStats.input_i}:measured_TP=${leftStats.input_tp}:` +
-        `measured_LRA=${leftStats.input_lra}:measured_thresh=${leftStats.input_thresh}:` +
-        `offset=${leftStats.target_offset},aformat=channel_layouts=mono[nleft]; ` +
-        `[right]afftdn[denoised_right]; ` +
-        `[denoised_right]loudnorm=I=-16:TP=-1.5:LRA=11:` +
-        `measured_I=${rightStats.input_i}:measured_TP=${rightStats.input_tp}:` +
-        `measured_LRA=${rightStats.input_lra}:measured_thresh=${rightStats.input_thresh}:` +
-        `offset=${rightStats.target_offset},aformat=channel_layouts=mono[nright]`;
+      // Downmix stereo to mono, apply noise reduction, and perform loudnorm
+      const filterComplex = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5[out]`;
       
       const args = [
         '-threads', '1',
         '-y',
         '-i', tempWavPath,
         '-filter_complex', filterComplex,
-        '-map', '[nleft]',
-        '-metadata:s:a:0', 'title=group audio',
-        '-map', '[nright]',
-        '-metadata:s:a:1', `title=${speakerName || 'Local Speaker'}`,
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        finalM4aPath
+        '-map', '[out]',
+        '-metadata', `title=${speakerName || 'Local Speaker'}`,
+        '-c:a', 'libmp3lame',
+        '-q:a', '5',
+        finalMp3Path
       ];
       
-      console.log(`[AudioProcessor] Rendering M4A package: ${finalM4aPath}`);
+      console.log(`[AudioProcessor] Rendering MP3 package: ${finalMp3Path}`);
       this.shell.execFileWithCallback('ffmpeg', args, (error, stdout, stderr) => {
         if (error) {
           console.error('[AudioProcessor] FFmpeg rendering error:', stderr || error.message);
@@ -81,8 +65,8 @@ class AudioProcessor {
         }
         
         try {
-          if (this.fs.existsSync(finalM4aPath)) {
-            console.log(`[AudioProcessor] Successfully created multi-track M4A at ${finalM4aPath}`);
+          if (this.fs.existsSync(finalMp3Path)) {
+            console.log(`[AudioProcessor] Successfully created mono MP3 at ${finalMp3Path}`);
             // Clean up temp WAV
             if (this.fs.existsSync(tempWavPath)) {
               this.fs.unlinkSync(tempWavPath);
@@ -90,7 +74,7 @@ class AudioProcessor {
             }
             resolve();
           } else {
-            reject(new Error('M4A output file was not created by FFmpeg'));
+            reject(new Error('MP3 output file was not created by FFmpeg'));
           }
         } catch (err) {
           console.error('[AudioProcessor] Cleanup or validation error:', err);

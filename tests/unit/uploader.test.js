@@ -14,8 +14,8 @@ describe('PocketUploader', () => {
         {
           id: 'rec-1',
           title: 'Recording 1',
-          fileName: 'recording_1.m4a',
-          filePath: '/path/to/recording_1.m4a',
+          fileName: 'recording_1.mp3',
+          filePath: '/path/to/recording_1.mp3',
           recordingAt: '2026-06-03T12:00:00Z',
           duration: 30,
           status: 'RECORDED',
@@ -40,7 +40,7 @@ describe('PocketUploader', () => {
       json: jest.fn().mockResolvedValue({
         success: true,
         data: {
-          upload_url: 'https://s3.amazonaws.com/pocket-bucket/recording_1.m4a',
+          upload_url: 'https://s3.amazonaws.com/pocket-bucket/recording_1.mp3',
           id: 'pocket-id-999'
         }
       })
@@ -59,18 +59,18 @@ describe('PocketUploader', () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        content_type: 'audio/mp4',
+        content_type: 'audio/mpeg',
         duration: 30,
-        file_name: 'recording_1.m4a',
+        file_name: 'recording_1.mp3',
         recording_at: '2026-06-03T12:00:00Z',
         title: 'Recording 1'
       })
     });
 
-    expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://s3.amazonaws.com/pocket-bucket/recording_1.m4a', {
+    expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://s3.amazonaws.com/pocket-bucket/recording_1.mp3', {
       method: 'PUT',
       headers: {
-        'Content-Type': 'audio/mp4'
+        'Content-Type': 'audio/mpeg'
       },
       body: Buffer.from('mock-audio-bytes')
     });
