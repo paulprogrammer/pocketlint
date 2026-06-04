@@ -889,3 +889,44 @@ body {
     transform: scale(1.15);
   }
 }
+
+/* Routing Guidance Card */
+.routing-instructions {
+  background-color: rgba(157, 89, 239, 0.03);
+  border: 1px dashed rgba(157, 89, 239, 0.2);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 14px;
+}
+
+.routing-instructions h4 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-purple);
+  margin-top: 0;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.routing-instructions ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.routing-instructions li {
+  margin-bottom: 4px;
+}
+
+.routing-instructions li:last-child {
+  margin-bottom: 0;
+}
+
+.routing-instructions li strong {
+  color: var(--text-main);
+}
