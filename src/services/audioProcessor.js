@@ -6,10 +6,9 @@ class AudioProcessor {
     this.fs = fsClient;
   }
 
-  analyzeLoudness(filePath, channel) {
+  analyzeLoudness(filePath) {
     return new Promise((resolve) => {
-      const inputChan = channel === 'left' ? 'c0' : 'c1';
-      const filter = `[0:a]pan=mono|c0=${inputChan}[mono_chan]; [mono_chan]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
+      const filter = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5:print_format=json`;
       const cmd = `ffmpeg -threads 1 -i "${filePath}" -filter_complex "${filter}" -f null -`;
       
       this.shell.execWithCallback(cmd, (error, stdout, stderr) => {
@@ -22,11 +21,11 @@ class AudioProcessor {
             const stats = JSON.parse(match[0]);
             return resolve(stats);
           } catch (e) {
-            console.error(`[AudioProcessor] Failed to parse loudnorm JSON for channel ${channel}:`, e);
+            console.error(`[AudioProcessor] Failed to parse loudnorm JSON:`, e);
           }
         }
         
-        console.warn(`[AudioProcessor] Analysis failed for channel ${channel}, using fallbacks.`);
+        console.warn(`[AudioProcessor] Analysis failed, using fallbacks.`);
         resolve({
           input_i: '-24.0',
           input_tp: '-2.0',
@@ -39,11 +38,16 @@ class AudioProcessor {
   }
 
   async normalizeAndTagRecording(tempWavPath, finalMp3Path, speakerName) {
-    console.log(`[AudioProcessor] Starting single-pass mono mixdown for: ${tempWavPath}`);
+    console.log(`[AudioProcessor] Starting dual-pass mono mixdown for: ${tempWavPath}`);
+    const stats = await this.analyzeLoudness(tempWavPath);
+    console.log('[AudioProcessor] Mixed loudness analysis complete.', { stats });
 
     return new Promise((resolve, reject) => {
-      // Downmix stereo to mono, apply noise reduction, and perform loudnorm
-      const filterComplex = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; [denoised]loudnorm=I=-16:TP=-1.5[out]`;
+      const filterComplex = `[0:a]pan=mono|c0=0.5*c0+0.5*c1[mixed]; [mixed]afftdn[denoised]; ` +
+        `[denoised]loudnorm=I=-16:TP=-1.5:LRA=11:` +
+        `measured_I=${stats.input_i}:measured_TP=${stats.input_tp}:` +
+        `measured_LRA=${stats.input_lra}:measured_thresh=${stats.input_thresh}:` +
+        `offset=${stats.target_offset}[out]`;
       
       const args = [
         '-threads', '1',
