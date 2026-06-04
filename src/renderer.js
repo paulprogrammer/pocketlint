@@ -431,6 +431,9 @@ function renderQueue(queue) {
       case 'RECORDED':
         statusBadge = '<span class="badge badge-recorded">Ready to sync</span>';
         break;
+      case 'PROCESSING':
+        statusBadge = '<span class="badge badge-processing"><div class="spinner"></div> Processing</span>';
+        break;
       case 'UPLOADING':
         statusBadge = '<span class="badge badge-uploading"><div class="spinner"></div> Syncing...</span>';
         break;
@@ -489,8 +492,8 @@ function renderQueue(queue) {
     }
     actionCell.appendChild(playBtn);
     
-    // 2. Retry upload button (only if not successfully uploaded and not actively uploading)
-    if (item.status === 'FAILED' || item.status === 'RECORDED') {
+    // 2. Retry upload button (only if not successfully uploaded)
+    if (item.status === 'FAILED' || item.status === 'RECORDED' || item.status === 'PROCESSING' || item.status === 'UPLOADING') {
       const retryBtn = document.createElement('button');
       retryBtn.className = 'icon-btn';
       retryBtn.title = 'Sync to Pocket';
@@ -499,20 +502,24 @@ function renderQueue(queue) {
           <path fill="currentColor" d="M19,12A7,7,0,0,1,7.24,16.58L8.85,15H4v4.85l1.62-1.62A9,9,0,1,0,19,12Z"/>
         </svg>
       `;
-      retryBtn.addEventListener('click', async () => {
+      if (item.status === 'PROCESSING' || item.status === 'UPLOADING') {
         retryBtn.disabled = true;
-        showToast('Initiating sync to Pocket...', 'info');
-        try {
-          const res = await window.pocketlintAPI.retryUpload(item.id);
-          if (res.success) {
-            showToast('Audio synced successfully', 'success');
-          } else {
-            showToast('Sync failed: ' + res.error, 'error');
+      } else {
+        retryBtn.addEventListener('click', async () => {
+          retryBtn.disabled = true;
+          showToast('Initiating sync to Pocket...', 'info');
+          try {
+            const res = await window.pocketlintAPI.retryUpload(item.id);
+            if (res.success) {
+              showToast('Audio synced successfully', 'success');
+            } else {
+              showToast('Sync failed: ' + res.error, 'error');
+            }
+          } catch (err) {
+            showToast('Sync error: ' + err.message, 'error');
           }
-        } catch (err) {
-          showToast('Sync error: ' + err.message, 'error');
-        }
-      });
+        });
+      }
       actionCell.appendChild(retryBtn);
     }
     

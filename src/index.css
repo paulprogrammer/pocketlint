@@ -286,6 +286,18 @@ body {
   background-color: rgba(255, 255, 255, 0.04);
 }
 
+.icon-btn:disabled {
+  color: var(--text-muted);
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: none;
+}
+
+.icon-btn:disabled:hover {
+  color: var(--text-muted);
+  background: none;
+}
+
 .refresh-btn {
   margin-left: 8px;
 }
@@ -729,6 +741,12 @@ body {
   background-color: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
   border: 1px solid var(--border-color);
+}
+
+.badge-processing {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: var(--accent-amber);
+  border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
 .badge-uploading {

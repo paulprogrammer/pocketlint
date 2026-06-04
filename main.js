@@ -264,17 +264,31 @@ ipcMain.handle('stop-recording', async () => {
         clearInterval(checkInterval);
 
         if (item) {
+          item.status = 'PROCESSING';
+          storage.saveQueue();
+          sendQueueUpdate();
+
           // Normalize and tag recording in the background, then trigger upload
           audioProcessor.normalizeAndTagRecording(item.tempWavPath, item.filePath, item.speakerName)
             .catch((err) => {
               console.error('[AudioNormalizer] Error during normalization:', err);
+              item.status = 'FAILED';
+              item.error = err.message;
+              storage.saveQueue();
             })
             .finally(() => {
               sendQueueUpdate();
+              if (item.status === 'FAILED') {
+                return;
+              }
               if (storage.config.apiKey) {
                 uploader.uploadRecording(item.id).catch((err) => {
                   console.error('Background upload failure:', err);
                 });
+              } else {
+                item.status = 'RECORDED';
+                storage.saveQueue();
+                sendQueueUpdate();
               }
             });
         } else {
