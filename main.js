@@ -376,3 +376,83 @@ ipcMain.handle('save-api-key', async (event, key) => {
     return { success: false, error: `Verification request failed: ${err.message}` };
   }
 });
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(reason = 'Signal') {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`[PocketLint] Graceful shutdown initiated (${reason})...`);
+
+  // 1. Close out any open recordings
+  if (recordProcess) {
+    console.log('[PocketLint] Stopping active recording process...');
+    const duration = Math.round((Date.now() - recordingStartTime) / 1000);
+    const item = storage.queue.find(x => x.id === currentRecordingId);
+    if (item) {
+      item.duration = duration;
+      item.status = 'FAILED';
+      item.error = 'Recording interrupted by application shutdown';
+      storage.saveQueue();
+    }
+
+    try {
+      recordProcess.kill('SIGINT');
+      
+      // Wait for recordProcess to exit
+      await new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (!recordProcess) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 50);
+        // Failsafe timeout
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve();
+        }, 2000);
+      });
+      console.log('[PocketLint] Recording process stopped.');
+    } catch (e) {
+      console.error('[PocketLint] Error stopping recording process:', e);
+    }
+  }
+
+  // 2. Kill playback if active
+  if (playbackProcess) {
+    console.log('[PocketLint] Stopping active playback process...');
+    try {
+      playbackProcess.kill();
+      playbackProcess = null;
+    } catch (e) {
+      console.error('[PocketLint] Error stopping playback process:', e);
+    }
+  }
+
+  // 3. Destroy the Y-split virtual loopback
+  console.log('[PocketLint] Tearing down Y-split loopbacks...');
+  try {
+    await audioSystem.teardownLoopback();
+    console.log('[PocketLint] Loopbacks torn down.');
+  } catch (e) {
+    console.error('[PocketLint] Error during loopback teardown:', e);
+  }
+
+  console.log('[PocketLint] Graceful shutdown complete. Exiting.');
+  process.exit(0);
+}
+
+// Register signal handlers
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Hook into Electron's before-quit event
+app.on('before-quit', (event) => {
+  if (!isShuttingDown) {
+    event.preventDefault();
+    gracefulShutdown('before-quit');
+  }
+});
+
