@@ -7,7 +7,8 @@ describe('AudioSystemService', () => {
 
   beforeEach(() => {
     mockShell = {
-      exec: jest.fn()
+      exec: jest.fn(),
+      spawn: jest.fn()
     };
     mockParser = {
       parseModules: jest.fn(),
@@ -78,6 +79,96 @@ describe('AudioSystemService', () => {
       expect(mockShell.exec).toHaveBeenNthCalledWith(4, 'pactl load-module module-null-sink sink_name=PocketRecordMix sink_properties=device.description="PocketRecordMix"');
       expect(mockShell.exec).toHaveBeenNthCalledWith(5, 'pactl load-module module-loopback source=PocketLoopback.monitor sink=PocketRecordMix latency_msec=20 adjust_time=0 channel_map=left');
       expect(mockShell.exec).toHaveBeenNthCalledWith(6, 'pactl load-module module-loopback source="my-source" sink=PocketRecordMix latency_msec=20 adjust_time=0 channel_map=right');
+    });
+  });
+
+  describe('recording operations', () => {
+    it('should spawn pw-record with correct arguments', async () => {
+      const mockProcess = {
+        on: jest.fn()
+      };
+      mockShell.spawn.mockReturnValue(mockProcess);
+
+      await service.startRecording('temp.wav');
+
+      expect(mockShell.spawn).toHaveBeenCalledWith('pw-record', [
+        '--target=PocketRecordMix',
+        '--properties=stream.capture.sink=true',
+        'temp.wav'
+      ]);
+      expect(mockProcess.on).toHaveBeenCalledWith('exit', expect.any(Function));
+      expect(service.isRecording()).toBe(true);
+    });
+
+    it('should kill the recording process and resolve stopRecording', async () => {
+      const mockProcess = {
+        on: jest.fn(),
+        kill: jest.fn()
+      };
+      let exitCallback;
+      mockProcess.on.mockImplementation((event, cb) => {
+        if (event === 'exit') exitCallback = cb;
+      });
+      mockShell.spawn.mockReturnValue(mockProcess);
+
+      await service.startRecording('temp.wav');
+
+      const stopPromise = service.stopRecording();
+      expect(mockProcess.kill).toHaveBeenCalledWith('SIGINT');
+
+      // Simulate process exit
+      exitCallback();
+
+      await stopPromise;
+      expect(service.isRecording()).toBe(false);
+    });
+  });
+
+  describe('playback operations', () => {
+    it('should spawn pw-play with correct arguments', async () => {
+      const mockProcess = {
+        on: jest.fn(),
+        kill: jest.fn()
+      };
+      mockShell.spawn.mockReturnValue(mockProcess);
+      const onExit = jest.fn();
+
+      await service.playRecording('audio.mp3', 'my-sink', onExit);
+
+      expect(mockShell.spawn).toHaveBeenCalledWith('pw-play', ['--target=my-sink', 'audio.mp3']);
+      expect(mockProcess.on).toHaveBeenCalledWith('exit', expect.any(Function));
+      expect(service.isPlaying()).toBe(true);
+      
+      // Simulate exit
+      const exitCallback = mockProcess.on.mock.calls.find(call => call[0] === 'exit')[1];
+      exitCallback();
+
+      expect(service.isPlaying()).toBe(false);
+      expect(onExit).toHaveBeenCalled();
+    });
+
+    it('should kill the playback process when stopPlayback is called', async () => {
+      const mockProcess = {
+        on: jest.fn(),
+        kill: jest.fn()
+      };
+      mockShell.spawn.mockReturnValue(mockProcess);
+
+      await service.playRecording('audio.mp3', 'my-sink');
+      await service.stopPlayback();
+
+      expect(mockProcess.kill).toHaveBeenCalled();
+    });
+  });
+
+  describe('playTestTone', () => {
+    it('should run ffmpeg and pw-play to play a beep sound', async () => {
+      mockShell.exec.mockResolvedValue({ stdout: '' });
+
+      await service.playTestTone('temp.wav');
+
+      expect(mockShell.exec).toHaveBeenNthCalledWith(1, 'ffmpeg -y -f lavfi -i "sine=frequency=800:duration=1" "temp.wav"');
+      expect(mockShell.exec).toHaveBeenNthCalledWith(2, 'pw-play --target=PocketLoopback "temp.wav"');
     });
   });
 });

@@ -2,6 +2,8 @@ class AudioSystemService {
   constructor(shellClient, parser) {
     this.shell = shellClient;
     this.parser = parser;
+    this.recordProcess = null;
+    this.playbackProcess = null;
   }
 
   async findLoadedModules() {
@@ -56,6 +58,70 @@ class AudioSystemService {
 
     // 5. Route physical microphone source to PocketRecordMix (Right channel only, without looping back to physical speakers)
     await this.shell.exec(`pactl load-module module-loopback source="${sourceName}" sink=PocketRecordMix latency_msec=20 adjust_time=0 channel_map=right`);
+  }
+
+  isRecording() {
+    return !!this.recordProcess;
+  }
+
+  isPlaying() {
+    return !!this.playbackProcess;
+  }
+
+  async startRecording(tempWavPath) {
+    if (this.recordProcess) {
+      throw new Error('Recording is already in progress.');
+    }
+    this.recordProcess = this.shell.spawn('pw-record', [
+      '--target=PocketRecordMix',
+      '--properties=stream.capture.sink=true',
+      tempWavPath
+    ]);
+    this.recordProcess.on('exit', () => {
+      this.recordProcess = null;
+    });
+  }
+
+  async stopRecording() {
+    return new Promise((resolve) => {
+      if (!this.recordProcess) {
+        return resolve();
+      }
+      this.recordProcess.kill('SIGINT');
+      const checkInterval = setInterval(() => {
+        if (!this.recordProcess) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 50);
+    });
+  }
+
+  async playRecording(filePath, targetSink, onExit) {
+    if (this.playbackProcess) {
+      this.playbackProcess.kill();
+      this.playbackProcess = null;
+    }
+    const target = targetSink || 'auto';
+    this.playbackProcess = this.shell.spawn('pw-play', [`--target=${target}`, filePath]);
+    this.playbackProcess.on('exit', () => {
+      this.playbackProcess = null;
+      if (onExit) onExit();
+    });
+  }
+
+  async stopPlayback() {
+    if (this.playbackProcess) {
+      this.playbackProcess.kill();
+      this.playbackProcess = null;
+    }
+  }
+
+  async playTestTone(tempWavPath) {
+    // Generate 1-second sine wave tone
+    await this.shell.exec(`ffmpeg -y -f lavfi -i "sine=frequency=800:duration=1" "${tempWavPath}"`);
+    // Play to the PocketLoopback sink
+    await this.shell.exec(`pw-play --target=PocketLoopback "${tempWavPath}"`);
   }
 }
 

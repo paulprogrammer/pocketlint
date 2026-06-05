@@ -21,11 +21,9 @@ const audioSystem = new AudioSystemService(shell, pactlParser);
 const audioProcessor = new AudioProcessor(shell);
 
 // In-memory Electron process/window state
-let recordProcess = null;
 let recordingStartTime = 0;
 let currentRecordingId = null;
 let mainWindow = null;
-let playbackProcess = null;
 
 // Setup Uploader with callbacks for IPC window notifications
 const uploader = new PocketUploader(storage, sendQueueUpdate);
@@ -101,8 +99,8 @@ ipcMain.handle('get-status', async () => {
   const { isSplitEnabled } = await audioSystem.findLoadedModules();
   return {
     isSplitEnabled,
-    isRecording: !!recordProcess,
-    recordingStartTime: recordProcess ? recordingStartTime : 0,
+    isRecording: audioSystem.isRecording(),
+    recordingStartTime: audioSystem.isRecording() ? recordingStartTime : 0,
     currentRecordingId
   };
 });
@@ -137,10 +135,7 @@ ipcMain.handle('teardown-loopback', async () => {
 ipcMain.handle('play-test-sound', async () => {
   try {
     const tempWav = path.join(os.tmpdir(), 'pocketlint_test_beep.wav');
-    // Generate 1-second sine wave tone
-    await shell.exec(`ffmpeg -y -f lavfi -i "sine=frequency=800:duration=1" "${tempWav}"`);
-    // Play to the PocketLoopback sink
-    await shell.exec(`pw-play --target=PocketLoopback "${tempWav}"`);
+    await audioSystem.playTestTone(tempWav);
     return { success: true };
   } catch (e) {
     console.error('Failed to play test sound:', e);
@@ -151,11 +146,6 @@ ipcMain.handle('play-test-sound', async () => {
 // 5b. Play recording
 ipcMain.handle('play-recording', async (event, id) => {
   try {
-    if (playbackProcess) {
-      playbackProcess.kill();
-      playbackProcess = null;
-    }
-
     const item = storage.queue.find(x => x.id === id);
     if (!item) throw new Error('Recording not found');
 
@@ -163,12 +153,8 @@ ipcMain.handle('play-recording', async (event, id) => {
       throw new Error('Recording file not found');
     }
 
-    // Play recording to target physical device if loopback is on, or default output
     const target = storage.config.targetSinkName || 'auto';
-    playbackProcess = spawn('pw-play', [`--target=${target}`, item.filePath]);
-
-    playbackProcess.on('exit', () => {
-      playbackProcess = null;
+    await audioSystem.playRecording(item.filePath, target, () => {
       if (mainWindow) {
         mainWindow.webContents.send('playback-ended', id);
       }
@@ -183,10 +169,7 @@ ipcMain.handle('play-recording', async (event, id) => {
 
 // 5c. Stop playback
 ipcMain.handle('stop-playback', async () => {
-  if (playbackProcess) {
-    playbackProcess.kill();
-    playbackProcess = null;
-  }
+  await audioSystem.stopPlayback();
   return { success: true };
 });
 
@@ -198,7 +181,7 @@ ipcMain.handle('start-recording', async (event, title, speakerName) => {
       throw new Error('Logical Y-Split is not enabled. Please enable it before recording.');
     }
 
-    if (recordProcess) {
+    if (audioSystem.isRecording()) {
       throw new Error('Recording is already in progress.');
     }
 
@@ -210,8 +193,7 @@ ipcMain.handle('start-recording', async (event, title, speakerName) => {
     recordingStartTime = Date.now();
     currentRecordingId = id;
 
-    // Start pw-record targetting our virtual monitor, writing to temp WAV
-    recordProcess = spawn('pw-record', ['--target=PocketRecordMix', '--properties=stream.capture.sink=true', tempWavPath]);
+    await audioSystem.startRecording(tempWavPath);
 
     const item = {
       id,
@@ -231,10 +213,6 @@ ipcMain.handle('start-recording', async (event, title, speakerName) => {
     storage.saveQueue();
     sendQueueUpdate();
 
-    recordProcess.on('exit', (code) => {
-      recordProcess = null;
-    });
-
     return { success: true, item };
   } catch (e) {
     console.error('Failed to start recording:', e);
@@ -244,9 +222,9 @@ ipcMain.handle('start-recording', async (event, title, speakerName) => {
 
 // 7. Stop recording
 ipcMain.handle('stop-recording', async () => {
-  return new Promise((resolve) => {
-    if (!recordProcess) {
-      return resolve({ success: false, error: 'No active recording to stop.' });
+  try {
+    if (!audioSystem.isRecording()) {
+      return { success: false, error: 'No active recording to stop.' };
     }
 
     const duration = Math.round((Date.now() - recordingStartTime) / 1000);
@@ -256,49 +234,45 @@ ipcMain.handle('stop-recording', async () => {
       storage.saveQueue();
     }
 
-    // Stop cleanly using SIGINT so the WAV header is written
-    recordProcess.kill('SIGINT');
+    await audioSystem.stopRecording();
 
-    const checkInterval = setInterval(() => {
-      if (!recordProcess) {
-        clearInterval(checkInterval);
+    if (item) {
+      item.status = 'PROCESSING';
+      storage.saveQueue();
+      sendQueueUpdate();
 
-        if (item) {
-          item.status = 'PROCESSING';
+      // Normalize and tag recording in the background, then trigger upload
+      audioProcessor.normalizeAndTagRecording(item.tempWavPath, item.filePath, item.speakerName)
+        .catch((err) => {
+          console.error('[AudioNormalizer] Error during normalization:', err);
+          item.status = 'FAILED';
+          item.error = err.message;
           storage.saveQueue();
+        })
+        .finally(() => {
           sendQueueUpdate();
-
-          // Normalize and tag recording in the background, then trigger upload
-          audioProcessor.normalizeAndTagRecording(item.tempWavPath, item.filePath, item.speakerName)
-            .catch((err) => {
-              console.error('[AudioNormalizer] Error during normalization:', err);
-              item.status = 'FAILED';
-              item.error = err.message;
-              storage.saveQueue();
-            })
-            .finally(() => {
-              sendQueueUpdate();
-              if (item.status === 'FAILED') {
-                return;
-              }
-              if (storage.config.apiKey) {
-                uploader.uploadRecording(item.id).catch((err) => {
-                  console.error('Background upload failure:', err);
-                });
-              } else {
-                item.status = 'RECORDED';
-                storage.saveQueue();
-                sendQueueUpdate();
-              }
+          if (item.status === 'FAILED') {
+            return;
+          }
+          if (storage.config.apiKey) {
+            uploader.uploadRecording(item.id).catch((err) => {
+              console.error('Background upload failure:', err);
             });
-        } else {
-          sendQueueUpdate();
-        }
+          } else {
+            item.status = 'RECORDED';
+            storage.saveQueue();
+            sendQueueUpdate();
+          }
+        });
+    } else {
+      sendQueueUpdate();
+    }
 
-        resolve({ success: true, item });
-      }
-    }, 50);
-  });
+    return { success: true, item };
+  } catch (e) {
+    console.error('Failed to stop recording:', e);
+    return { success: false, error: e.message };
+  }
 });
 
 // 8. Queue control
@@ -386,7 +360,7 @@ async function gracefulShutdown(reason = 'Signal') {
   console.log(`[PocketLint] Graceful shutdown initiated (${reason})...`);
 
   // 1. Close out any open recordings
-  if (recordProcess) {
+  if (audioSystem.isRecording()) {
     console.log('[PocketLint] Stopping active recording process...');
     const duration = Math.round((Date.now() - recordingStartTime) / 1000);
     const item = storage.queue.find(x => x.id === currentRecordingId);
@@ -398,22 +372,7 @@ async function gracefulShutdown(reason = 'Signal') {
     }
 
     try {
-      recordProcess.kill('SIGINT');
-      
-      // Wait for recordProcess to exit
-      await new Promise((resolve) => {
-        const checkInterval = setInterval(() => {
-          if (!recordProcess) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 50);
-        // Failsafe timeout
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          resolve();
-        }, 2000);
-      });
+      await audioSystem.stopRecording();
       console.log('[PocketLint] Recording process stopped.');
     } catch (e) {
       console.error('[PocketLint] Error stopping recording process:', e);
@@ -421,11 +380,10 @@ async function gracefulShutdown(reason = 'Signal') {
   }
 
   // 2. Kill playback if active
-  if (playbackProcess) {
+  if (audioSystem.isPlaying()) {
     console.log('[PocketLint] Stopping active playback process...');
     try {
-      playbackProcess.kill();
-      playbackProcess = null;
+      await audioSystem.stopPlayback();
     } catch (e) {
       console.error('[PocketLint] Error stopping playback process:', e);
     }
