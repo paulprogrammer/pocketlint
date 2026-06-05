@@ -211,7 +211,7 @@ ipcMain.handle('start-recording', async (event, title, speakerName) => {
     currentRecordingId = id;
 
     // Start pw-record targetting our virtual monitor, writing to temp WAV
-    recordProcess = spawn('pw-record', ['--target=PocketRecordMix', tempWavPath]);
+    recordProcess = spawn('pw-record', ['--target=PocketRecordMix', '--properties=stream.capture.sink=true', tempWavPath]);
 
     const item = {
       id,
