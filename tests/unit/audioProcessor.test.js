@@ -78,15 +78,14 @@ Output message
   });
 
   describe('normalizeAndTagRecording', () => {
-    it('should execute ffmpeg file conversion and delete temporary wav', async () => {
+    it('should render a stereo Ogg/Opus file with per-channel normalization and delete temporary wav', async () => {
       let loudnessCount = 0;
       mockShell.execWithCallback.mockImplementation((cmd, cb) => {
         loudnessCount++;
+        // 1st call = left/remote channel, 2nd call = right/local channel
         const stats = loudnessCount === 1
           ? '{ "input_i": "-12.0", "input_tp": "-1.0", "input_lra": "8.0", "input_thresh": "-22.0", "target_offset": "2.0" }'
-          : loudnessCount === 2
-            ? '{ "input_i": "-14.0", "input_tp": "-1.5", "input_lra": "9.0", "input_thresh": "-24.0", "target_offset": "1.0" }'
-            : '{ "input_i": "-13.0", "input_tp": "-1.2", "input_lra": "8.5", "input_thresh": "-23.0", "target_offset": "1.5" }';
+          : '{ "input_i": "-14.0", "input_tp": "-1.5", "input_lra": "9.0", "input_thresh": "-24.0", "target_offset": "1.0" }';
         cb(null, '', stats);
       });
 
@@ -96,35 +95,45 @@ Output message
 
       mockFs.existsSync.mockReturnValue(true);
 
-      await processor.normalizeAndTagRecording('temp.wav', 'final.mp3', 'Paul Williams');
+      await processor.normalizeAndTagRecording('temp.wav', 'final.ogg', 'Paul Williams');
 
-      expect(mockShell.execWithCallback).toHaveBeenCalledTimes(3);
+      // Only two analysis passes now: one per channel (no mixed pass).
+      expect(mockShell.execWithCallback).toHaveBeenCalledTimes(2);
       expect(mockShell.execFileWithCallback).toHaveBeenCalledTimes(1);
 
       const [file, args] = mockShell.execFileWithCallback.mock.calls[0];
       expect(file).toBe('ffmpeg');
       expect(args).toContain('temp.wav');
-      expect(args).toContain('final.mp3');
+      expect(args).toContain('final.ogg');
       expect(args).toContain('title=Paul Williams');
-      
+      // Encodes with Opus in an Ogg container, not MP3.
+      expect(args).toContain('libopus');
+      expect(args).not.toContain('libmp3lame');
+
       const filterComplexIdx = args.indexOf('-filter_complex');
       expect(filterComplexIdx).not.toBe(-1);
       const filterComplex = args[filterComplexIdx + 1];
-      expect(filterComplex).toContain('pan=mono|c0=0.5*c0+0.5*c1');
+      // Channels are kept separate (no downmix) and recombined to stereo.
+      expect(filterComplex).not.toContain('pan=mono|c0=0.5*c0+0.5*c1');
+      expect(filterComplex).toContain('pan=mono|c0=c0');
+      expect(filterComplex).toContain('pan=mono|c0=c1');
+      expect(filterComplex).toContain('join=inputs=2:channel_layout=stereo');
       expect(filterComplex).toContain('afftdn');
-      expect(filterComplex).toContain('measured_I=-13.0:measured_TP=-1.2:measured_LRA=8.5:measured_thresh=-23.0:offset=1.5');
+      // Each channel normalized independently with its own measured stats.
+      expect(filterComplex).toContain('measured_I=-12.0:measured_TP=-1.0:measured_LRA=8.0:measured_thresh=-22.0:offset=2.0');
+      expect(filterComplex).toContain('measured_I=-14.0:measured_TP=-1.5:measured_LRA=9.0:measured_thresh=-24.0:offset=1.0');
 
-      expect(mockFs.existsSync).toHaveBeenCalledWith('final.mp3');
+      expect(mockFs.existsSync).toHaveBeenCalledWith('final.ogg');
       expect(mockFs.existsSync).toHaveBeenCalledWith('temp.wav');
       expect(mockFs.unlinkSync).toHaveBeenCalledWith('temp.wav');
     });
 
-    it('should skip loudness processing if one of the channels is silent', async () => {
+    it('should skip loudness normalization only for the silent channel', async () => {
       let loudnessCount = 0;
       mockShell.execWithCallback.mockImplementation((cmd, cb) => {
         loudnessCount++;
-        // Left is silent (-50.0 LUFS), Right is active (-14.0 LUFS)
-        const stats = loudnessCount === 1 
+        // Left/remote is silent (-50.0 LUFS), Right/local is active (-14.0 LUFS)
+        const stats = loudnessCount === 1
           ? '{ "input_i": "-50.0", "input_tp": "-8.0", "input_lra": "1.0", "input_thresh": "-60.0", "target_offset": "0.0" }'
           : '{ "input_i": "-14.0", "input_tp": "-1.5", "input_lra": "9.0", "input_thresh": "-24.0", "target_offset": "1.0" }';
         cb(null, '', stats);
@@ -136,21 +145,25 @@ Output message
 
       mockFs.existsSync.mockReturnValue(true);
 
-      await processor.normalizeAndTagRecording('temp.wav', 'final.mp3', 'Paul Williams');
+      await processor.normalizeAndTagRecording('temp.wav', 'final.ogg', 'Paul Williams');
 
-      expect(mockShell.execWithCallback).toHaveBeenCalledTimes(2); // mixed pass skipped
+      expect(mockShell.execWithCallback).toHaveBeenCalledTimes(2);
       expect(mockShell.execFileWithCallback).toHaveBeenCalledTimes(1);
 
       const [file, args] = mockShell.execFileWithCallback.mock.calls[0];
       expect(file).toBe('ffmpeg');
-      expect(args).toContain('final.mp3');
-      
+      expect(args).toContain('final.ogg');
+      expect(args).toContain('libopus');
+
       const filterComplexIdx = args.indexOf('-filter_complex');
       expect(filterComplexIdx).not.toBe(-1);
       const filterComplex = args[filterComplexIdx + 1];
-      expect(filterComplex).toContain('pan=mono|c0=0.5*c0+0.5*c1');
       expect(filterComplex).toContain('afftdn');
-      expect(filterComplex).not.toContain('loudnorm'); // loudnorm filter is skipped
+      expect(filterComplex).toContain('join=inputs=2:channel_layout=stereo');
+      // The active (right) channel is still loudness-normalized...
+      expect(filterComplex).toContain('measured_I=-14.0:measured_TP=-1.5:measured_LRA=9.0:measured_thresh=-24.0:offset=1.0');
+      // ...but the silent (left) channel is not.
+      expect(filterComplex).not.toContain('measured_I=-50.0');
     });
   });
 });

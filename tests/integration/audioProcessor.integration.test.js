@@ -24,7 +24,7 @@ function goertzel(samples, targetFrequency, sampleRate) {
 
 describe('AudioProcessor Integration Test (Frequency Verification)', () => {
   const tempWavPath = path.join(__dirname, 'temp_input_stereo.wav');
-  const tempMp3Path = path.join(__dirname, 'temp_output_mono.mp3');
+  const tempOggPath = path.join(__dirname, 'temp_output_stereo.ogg');
   const tempRawPath = path.join(__dirname, 'temp_output.raw');
 
   let processor;
@@ -35,15 +35,15 @@ describe('AudioProcessor Integration Test (Frequency Verification)', () => {
 
   afterEach(() => {
     // Clean up temporary files
-    [tempWavPath, tempMp3Path, tempRawPath].forEach((file) => {
+    [tempWavPath, tempOggPath, tempRawPath].forEach((file) => {
       if (fs.existsSync(file)) {
         fs.unlinkSync(file);
       }
     });
   });
 
-  it('should downmix and preserve Left (440Hz) and Right (880Hz) source tones in mixed mono MP3', async () => {
-    // 1. Generate 2-second stereo WAV with 440Hz Left (system) and 880Hz Right (mic)
+  it('should keep Left (440Hz, remote) and Right (880Hz, local) tones on separate channels in stereo Ogg/Opus', async () => {
+    // 1. Generate 2-second stereo WAV with 440Hz Left (system/remote) and 880Hz Right (mic/local)
     const generateCmd = `ffmpeg -y -f lavfi -i "sine=frequency=440:duration=2:sample_rate=44100" ` +
       `-f lavfi -i "sine=frequency=880:duration=2:sample_rate=44100" ` +
       `-filter_complex "[0:a][1:a]join=inputs=2:channel_layout=stereo[a]" ` +
@@ -52,45 +52,51 @@ describe('AudioProcessor Integration Test (Frequency Verification)', () => {
     await shell.exec(generateCmd);
     expect(fs.existsSync(tempWavPath)).toBe(true);
 
-    // 2. Perform normalizeAndTagRecording (dual-pass downmix, denoise, normalize, tag)
-    await processor.normalizeAndTagRecording(tempWavPath, tempMp3Path, 'Tester');
-    expect(fs.existsSync(tempMp3Path)).toBe(true);
+    // 2. Perform normalizeAndTagRecording (per-channel denoise + normalize, stereo Opus, tag)
+    await processor.normalizeAndTagRecording(tempWavPath, tempOggPath, 'Tester');
+    expect(fs.existsSync(tempOggPath)).toBe(true);
 
-    // 3. Convert MP3 output back to raw s16le PCM for spectral analysis
-    const pcmCmd = `ffmpeg -y -i "${tempMp3Path}" -f s16le -acodec pcm_s16le "${tempRawPath}"`;
+    // 3. Decode Ogg/Opus back to interleaved stereo s16le PCM (force 44100 for deterministic analysis;
+    //    Opus operates at 48kHz internally so we resample on decode)
+    const pcmCmd = `ffmpeg -y -i "${tempOggPath}" -ar 44100 -f s16le -acodec pcm_s16le "${tempRawPath}"`;
     await shell.exec(pcmCmd);
     expect(fs.existsSync(tempRawPath)).toBe(true);
 
-    // 4. Load PCM samples and slice a 2048-sample window from the middle
+    // 4. Deinterleave stereo PCM into separate left and right sample arrays
     const buffer = fs.readFileSync(tempRawPath);
-    const allSamples = [];
-    for (let i = 0; i < buffer.length; i += 2) {
-      allSamples.push(buffer.readInt16LE(i) / 32768); // Convert to [-1.0, 1.0] range
+    const left = [];
+    const right = [];
+    for (let i = 0; i + 3 < buffer.length; i += 4) {
+      left.push(buffer.readInt16LE(i) / 32768);      // Convert to [-1.0, 1.0] range
+      right.push(buffer.readInt16LE(i + 2) / 32768);
     }
 
-    const startSample = Math.floor(allSamples.length / 2);
+    // 5. Slice a 2048-sample window from the middle of each channel
     const windowSize = 2048;
-    const samples = allSamples.slice(startSample, startSample + windowSize);
+    const startSample = Math.floor(left.length / 2);
+    const leftWindow = left.slice(startSample, startSample + windowSize);
+    const rightWindow = right.slice(startSample, startSample + windowSize);
 
-    // 5. Run Goertzel to verify target frequencies (440Hz, 880Hz) and control (600Hz)
+    // 6. Run Goertzel per channel to verify the tones stayed separated
     const sampleRate = 44100;
-    const magnitude440 = goertzel(samples, 440, sampleRate);
-    const magnitude880 = goertzel(samples, 880, sampleRate);
-    const magnitude600 = goertzel(samples, 600, sampleRate);
+    const left440 = goertzel(leftWindow, 440, sampleRate);
+    const left880 = goertzel(leftWindow, 880, sampleRate);
+    const right440 = goertzel(rightWindow, 440, sampleRate);
+    const right880 = goertzel(rightWindow, 880, sampleRate);
 
     console.log('[Integration Test] Goertzel Magnitudes:', {
-      '440Hz (Left - System)': magnitude440,
-      '880Hz (Right - Mic)': magnitude880,
-      '600Hz (Control)': magnitude600
+      'Left ch 440Hz (remote tone)': left440,
+      'Left ch 880Hz (crosstalk)': left880,
+      'Right ch 880Hz (local tone)': right880,
+      'Right ch 440Hz (crosstalk)': right440
     });
 
-    // 6. Assertions
-    expect(magnitude440).toBeGreaterThan(0.01); // Left channel tone is present
-    expect(magnitude880).toBeGreaterThan(0.01); // Right channel tone is present
-    expect(magnitude600).toBeLessThan(0.008);    // Control frequency is absent
+    // 7. Assertions: each channel carries its own tone, with minimal bleed from the other
+    expect(left440).toBeGreaterThan(0.01);   // Remote tone present on left channel
+    expect(right880).toBeGreaterThan(0.01);  // Local tone present on right channel
 
-    // Relative assertions (target tones should be noticeably louder than control)
-    expect(magnitude440).toBeGreaterThan(magnitude600 * 2);
-    expect(magnitude880).toBeGreaterThan(magnitude600 * 1.5);
+    // The tone should dominate its own channel versus the other channel's tone
+    expect(left440).toBeGreaterThan(left880 * 4);
+    expect(right880).toBeGreaterThan(right440 * 4);
   });
 });

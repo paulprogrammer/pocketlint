@@ -35,7 +35,7 @@ class PocketUploader {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          content_type: 'audio/mpeg',
+          content_type: 'audio/ogg',
           duration: item.duration,
           file_name: item.fileName,
           recording_at: item.recordingAt,
@@ -72,7 +72,7 @@ class PocketUploader {
       const s3Response = await this.fetch(uploadUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'audio/mpeg'
+          'Content-Type': 'audio/ogg'
         },
         body: audioData
       });
