@@ -37,7 +37,6 @@ Requires:       ffmpeg
 Requires:       alsa-lib
 Requires:       gtk3
 Requires:       nss
-Requires:       libXScrnSaver
 Requires:       libXtst
 Requires:       mesa-libgbm
 
@@ -58,9 +57,13 @@ to HeyPocketAI via public APIs.
 mkdir -p %{buildroot}/opt/PocketLint
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_datadir}/applications
+mkdir -p %{buildroot}%{_datadir}/icons/hicolor/256x256/apps
 
 # Copy the pre-compiled electron app files from the sources folder
 cp -r %{_topdir}/SOURCES/linux-unpacked/* %{buildroot}/opt/PocketLint/
+
+# Copy the icon file
+cp %{_topdir}/SOURCES/pocketlint.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/pocketlint.png
 
 # Create a symbolic link in the standard user binary directory
 ln -sf /opt/PocketLint/pocketlint %{buildroot}%{_bindir}/pocketlint
@@ -83,6 +86,7 @@ EOF
 %exclude /opt/PocketLint/chrome-sandbox
 %{_bindir}/pocketlint
 %{_datadir}/applications/pocketlint.desktop
+%{_datadir}/icons/hicolor/256x256/apps/pocketlint.png
 
 # Special permissions for the chrome-sandbox binary to function properly
 %attr(4755, root, root) /opt/PocketLint/chrome-sandbox
@@ -119,6 +123,13 @@ async function build() {
     console.log('Linking compiled files to rpmbuild sources...');
     const sourceLinkDir = path.join(rpmbuildDir, 'SOURCES', 'linux-unpacked');
     fs.symlinkSync(unpackedDir, sourceLinkDir, 'dir');
+
+    // Copy icon to SOURCES
+    console.log('Copying icon to rpmbuild sources...');
+    fs.copyFileSync(
+      path.join(projectDir, 'src', 'assets', 'icon.png'),
+      path.join(rpmbuildDir, 'SOURCES', 'pocketlint.png')
+    );
 
     // Write the spec file
     console.log('Writing pocketlint.spec...');

@@ -4,6 +4,12 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const os = require('os');
 
+// Set application details for taskbar integration
+app.setName('PocketLint');
+if (process.platform === 'linux') {
+  app.setDesktopName('pocketlint');
+}
+
 // Utilities and Services
 const pactlParser = require('./src/utils/pactlParser');
 const shell = require('./src/utils/shell');
@@ -38,6 +44,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 750,
+    icon: path.join(__dirname, 'src', 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
